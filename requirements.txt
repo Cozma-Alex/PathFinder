@@ -19,6 +19,9 @@ opencv-python==4.10.0.84
 pillow==11.0.0
 progressbar2==4.5.0
 pynput==1.7.7
+PyQt6==6.8.0
+PyQt6-Qt6==6.8.1
+PyQt6_sip==13.9.1
 python-dateutil==2.9.0.post0
 python-utils==3.9.1
 python-xlib==0.33
