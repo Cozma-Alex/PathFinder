@@ -940,3 +940,18 @@ coverage*[.json, .xml, .info]
 ### xmake ###
 # Xmake cache
 .xmake/
+
+
+# S3DIS
+PathFinder/S3DIS/*
+PathFinder/Stanford3dDataset_v1.2/*
+*.txt
+*.npy
+*.h5
+*.json
+!requirements.txt
+*.DS_Store
+Icon
+*lib64
+*.mat
+*.cfg
