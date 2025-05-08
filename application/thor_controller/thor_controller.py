@@ -27,6 +27,7 @@ class ThorController:
         self.keyboard_listener = None
         self.custom_control_function = None
         self.controller = None
+        self.controller_lock = threading.Lock()
         self.key_mappings = {
             'shift': Action.MOVE_FORWARD,
             'ctrl': Action.MOVE_BACK,
@@ -39,26 +40,28 @@ class ThorController:
     def init_controller(self):
         try:
             logger.info(f"Initializing Thor controller for scene: {self.scene}")
-            self.controller = Controller(
-                agentMode="locobot",
-                scene=self.scene,
-                visibilityDistance=1.5,
-                headless=self.headless,
-                renderInstanceSegmentation=False,
-                renderDepthImage=False,
-                width=400,
-                height=300,
-                gridSize=0.25,
-                rotateStepDegrees=90,
-                quality="Very Low",
-                createWindow=True
-            )
+            with self.controller_lock:
+                self.controller = Controller(
+                    agentMode="locobot",
+                    scene=self.scene,
+                    visibilityDistance=1.5,
+                    headless=self.headless,
+                    renderInstanceSegmentation=False,
+                    renderDepthImage=False,
+                    width=400,
+                    height=300,
+                    gridSize=0.25,
+                    rotateStepDegrees=90,
+                    quality="Very Low",
+                    createWindow=True
+                )
             logger.info(f"Controller initialized for scene: {self.scene}")
             
             # Test with a simple Pass action
             first_event = self.controller.step(action="Pass")
-            if not first_event.metadata['lastActionSuccess']:
-                logger.warning(f"Initial action failed: {first_event.metadata['errorMessage']}")
+            logger.info(f"Initialize return: {first_event.metadata}")
+            if not first_event.metadata.get('lastActionSuccess', True):
+                logger.warning(f"Initial action failed: {first_event.metadata.get('errorMessage', 'Unknown error')}")
         except Exception as e:
             logger.error(f"Controller initialization error: {str(e)}")
             self.controller = None
@@ -88,57 +91,93 @@ class ThorController:
             return False
 
     def _handle_manual_controls(self):
-        if not self.controller:
+        if not self.is_running:
             return None
             
+        with self.controller_lock:
+            if not self.controller:
+                return None
+                
         if self.current_key in self.key_mappings:
             action = self.key_mappings[self.current_key]
             if action in [Action.FACE_NORTH, Action.FACE_SOUTH, Action.FACE_EAST, Action.FACE_WEST]:
                 rotation = int(action.value.split('rotation=')[1])
                 try:
-                    current_pos = self.controller.last_event.metadata['agent']['position']
-                    return self.controller.step(
-                        action="Teleport",
-                        position=current_pos,
-                        rotation={"y": rotation}
-                    )
+                    with self.controller_lock:
+                        if not self.controller:
+                            return None
+                        current_pos = self.controller.last_event.metadata['agent']['position']
+                        return self.controller.step(
+                            action="Teleport",
+                            position=current_pos,
+                            rotation={"y": rotation}
+                        )
                 except Exception as e:
                     logger.error(f"Error during rotation: {str(e)}")
                     return None
             try:
-                return self.controller.step(action=action.value)
+                with self.controller_lock:
+                    if not self.controller:
+                        return None
+                    return self.controller.step(action=action.value)
             except Exception as e:
                 logger.error(f"Error executing action {action.value}: {str(e)}")
                 return None
         
         try:
-            return self.controller.step(action=Action.PASS.value)
+            with self.controller_lock:
+                if not self.controller:
+                    return None
+                return self.controller.step(action=Action.PASS.value)
         except Exception as e:
             logger.error(f"Error executing Pass action: {str(e)}")
             return None
 
     def _control_loop(self):
-        while self.is_running and self.controller:
+        retry_count = 0
+        max_retries = 3
+        
+        while self.is_running:
             try:
+                if not self.is_running:
+                    break
+                    
                 if self.custom_control_function:
                     try:
-                        event = self.custom_control_function(self.controller)
-                        if event and not event.metadata['lastActionSuccess']:
-                            logger.warning(f"Action failed: {event.metadata['errorMessage']}")
+                        with self.controller_lock:
+                            if not self.controller:
+                                break
+                                
+                            event = self.custom_control_function(self.controller)
+                            if event and not event.metadata['lastActionSuccess']:
+                                logger.warning(f"Action failed: {event.metadata.get('errorMessage', 'Unknown error')}")
+                                
                     except Exception as e:
                         logger.error(f"Custom control function error: {str(e)}")
+                        retry_count += 1
+                        if retry_count >= max_retries:
+                            logger.error(f"Max retries reached, stopping controller")
+                            self.stop()
+                            break
                 else:
                     event = self._handle_manual_controls()
-                    if event and not event.metadata['lastActionSuccess']:
-                        logger.warning(f"Manual action failed: {event.metadata['errorMessage']}")
+                    if event and not event.metadata.get('lastActionSuccess', True):
+                        logger.warning(f"Manual action failed: {event.metadata.get('errorMessage', 'Unknown error')}")
+                        
+                # Reset retry count on successful execution
+                retry_count = 0
                 time.sleep(0.1)
+                
             except Exception as e:
                 logger.error(f"Control loop error: {str(e)}")
-                time.sleep(1.0)
-                # Check if controller is still valid before continuing
-                if not self.controller:
-                    logger.info("Controller no longer valid, exiting control loop")
+                retry_count += 1
+                
+                if retry_count >= max_retries:
+                    logger.error(f"Max retries reached, stopping controller")
+                    self.stop()
                     break
+                    
+                time.sleep(1.0)
 
     def start(self, control_function: Optional[Callable] = None):
         if self.is_running:
@@ -146,7 +185,11 @@ class ThorController:
             return
             
         if not self.controller:
-            self.init_controller()
+            try:
+                self.init_controller()
+            except Exception as e:
+                logger.error(f"Failed to initialize controller: {str(e)}")
+                return
             
         if not self.controller:
             logger.error("Failed to initialize controller")
@@ -186,33 +229,36 @@ class ThorController:
             except Exception as e:
                 logger.error(f"Error stopping keyboard listener: {str(e)}")
             
-        if self.controller:
-            try:
-                self.controller.stop()
-                logger.info("Controller stopped successfully")
-            except Exception as e:
-                logger.error(f"Error stopping controller: {str(e)}")
-            finally:
-                self.controller = None
+        with self.controller_lock:
+            if self.controller:
+                try:
+                    self.controller.stop()
+                    logger.info("Controller stopped successfully")
+                except Exception as e:
+                    logger.error(f"Error stopping controller: {str(e)}")
+                finally:
+                    self.controller = None
 
     def execute_action(self, action: Action) -> Dict[str, Any]:
-        if not self.controller:
-            logger.warning("Cannot execute action: controller not initialized")
-            return {}
-            
-        try:
-            return self.controller.step(action=action.value)
-        except Exception as e:
-            logger.error(f"Error executing action {action.value}: {str(e)}")
-            return {}
+        with self.controller_lock:
+            if not self.controller or not self.is_running:
+                logger.warning("Cannot execute action: controller not initialized or not running")
+                return {}
+                
+            try:
+                return self.controller.step(action=action.value)
+            except Exception as e:
+                logger.error(f"Error executing action {action.value}: {str(e)}")
+                return {}
 
     def get_current_state(self) -> Dict[str, Any]:
-        if not self.controller:
-            logger.warning("Cannot get current state: controller not initialized")
-            return {}
-            
-        try:
-            return self.controller.last_event
-        except Exception as e:
-            logger.error(f"Error getting current state: {str(e)}")
-            return {}
+        with self.controller_lock:
+            if not self.controller or not self.is_running:
+                logger.warning("Cannot get current state: controller not initialized or not running")
+                return {}
+                
+            try:
+                return self.controller.last_event
+            except Exception as e:
+                logger.error(f"Error getting current state: {str(e)}")
+                return {}
