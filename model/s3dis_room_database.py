@@ -2,8 +2,6 @@ import numpy as np
 import os
 import torch
 from torch_geometric.data import Dataset, Data
-import torch.nn.functional as F
-from collections import defaultdict
 
 
 class S3DISRoomDataset(Dataset):

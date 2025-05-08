@@ -1,5 +1,4 @@
 import torch
-import os
 from s3dis_processor import S3DISProcessor, NavigationDataset
 from navigation_model import NavigationNet
 from trainer import NavigationTrainer

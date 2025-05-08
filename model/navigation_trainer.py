@@ -1,18 +1,13 @@
 import torch
 import torch.nn.functional as F
-from torch_geometric.loader import DataLoader
 from collections import deque
-import random
-import numpy as np
-from tqdm import tqdm
-from torch_geometric.data import Data
 
 
 class NavigationTrainer:
     def __init__(self, model, device="cpu", max_steps=50):
-        self.model = model.to(device)
+        self.model = model
         self.device = device
-        self.optimizer = torch.optim.Adam(self.model.parameters())
+        self.optimizer = torch.optim.Adam(model.policy_net.parameters(), lr=0.0003)
         self.memory = deque(maxlen=10000)
         self.batch_size = 32
         self.gamma = 0.99
@@ -28,153 +23,122 @@ class NavigationTrainer:
         self.memory.append((state, action, reward, next_state, done))
 
     def update_policy(self, state, action, reward, next_state, done):
-        if not isinstance(state, torch.Tensor):
-            state = torch.FloatTensor(state).to(self.device)
-        if not isinstance(next_state, torch.Tensor):
-            next_state = torch.FloatTensor(next_state).to(self.device)
+        state = state.to(self.device)
+        next_state = next_state.to(self.device)
+        action = torch.tensor([action], device=self.device).unsqueeze(1)
+        reward = torch.tensor([reward], device=self.device)
+        done = torch.tensor([done], dtype=torch.bool, device=self.device)
 
-        action = torch.LongTensor([action]).to(self.device)
-        reward = torch.FloatTensor([reward]).to(self.device)
-        done = torch.BoolTensor([done]).to(self.device)
+        policy, value, _ = self.model.policy_net(state.unsqueeze(0))
+        policy_value = policy.gather(1, action)
 
-        curr_Q = self.model.policy_net(state)[0]
-        curr_Q = curr_Q.gather(1, action.unsqueeze(1))
+        with torch.no_grad():
+            next_policy, next_value, _ = self.model.target_net(next_state.unsqueeze(0))
+            max_next_value = next_policy.max(1)[0]
+            expected_value = reward + self.gamma * max_next_value * (~done)
 
-        next_Q = self.model.target_net(next_state)[0]
-        max_next_Q = next_Q.max(1)[0].detach()
-        expected_Q = (max_next_Q * self.gamma * (~done)) + reward
-
-        loss = F.smooth_l1_loss(curr_Q, expected_Q.unsqueeze(1))
+        loss = F.smooth_l1_loss(policy_value, expected_value.unsqueeze(1))
 
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 100)
+        torch.nn.utils.clip_grad_norm_(self.model.policy_net.parameters(), 100)
         self.optimizer.step()
 
         return loss.item()
 
-    def train_epoch(self, train_loader, epoch):
-        self.model.train()
+    def train_epoch(self, data_loader, epoch):
+        self.model.policy_net.train()
         total_loss = 0
-        num_steps = 0
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch}")
+        batch_count = 0
 
-        for batch in pbar:
-            batch = batch.to(self.device)
-            current_state = batch.clone()
+        for batch in data_loader:
+            batch_loss = 0
+            batch_count += 1
 
-            for step in range(self.max_steps):
-                action, _ = self.model.get_action(
-                    current_state.state, epsilon=self.epsilon
+            for state in batch:
+                state = state.to(self.device)
+                current_state = state.clone()
+
+                for step in range(self.max_steps):
+                    action, _ = self.model.get_action(
+                        current_state, epsilon=self.epsilon
+                    )
+                    action_idx = action.item()
+
+                    next_state, reward, done = self.simulate_step(
+                        current_state, action_idx
+                    )
+                    loss = self.update_policy(
+                        current_state, action_idx, reward, next_state, done
+                    )
+                    batch_loss += loss
+
+                    if done:
+                        break
+
+                    current_state = next_state
+
+            total_loss += batch_loss / len(batch)
+
+            if batch_count % 10 == 0:
+                print(
+                    f"  Batch {batch_count}: Loss = {batch_loss / len(batch):.4f}, Epsilon = {self.epsilon:.4f}"
                 )
-
-                next_state = self.get_next_state(current_state, action)
-                reward = self.compute_reward(next_state, batch)
-                done = self.check_done(next_state, batch)
-
-                loss = self.update_policy(
-                    current_state.state, action, reward, next_state.state, done
-                )
-                total_loss += loss
-                num_steps += 1
-
-                if done:
-                    break
-
-                current_state = next_state
-
-            pbar.set_postfix({"loss": total_loss / num_steps, "epsilon": self.epsilon})
 
         self.epsilon = max(self.eps_end, self.epsilon * self.eps_decay)
+
         if epoch % self.target_update == 0:
             self.model.update_target_net()
 
-        return total_loss / num_steps if num_steps > 0 else 0.0
+        return total_loss / batch_count if batch_count > 0 else 0
 
-    def get_next_state(self, current_state, action):
-        next_state = current_state.clone()
+    def simulate_step(self, state, action):
+        next_state = state.clone()
 
-        if next_state.state.dim() == 2:
-            H = int(np.sqrt(next_state.state.size(1)))
-            next_state.state = next_state.state.view(-1, H, H)
+        grid_map = state[0]
+        agent_mask = state[1]
+        goal_mask = state[2]
 
-        for i in range(3):
-            next_state_i = next_state.state[i]
-            if next_state_i.dim() == 1:
-                H = int(np.sqrt(next_state_i.size(0)))
-                next_state.state[i] = next_state_i.view(H, H)
+        agent_pos = torch.nonzero(agent_mask)[0]
+        goal_pos = torch.nonzero(goal_mask)[0]
 
-        agent_state = next_state.state[1]
-        agent_pos = torch.nonzero(agent_state)
-        if len(agent_pos) == 0:
-            return next_state
+        next_pos = self.get_next_position(agent_pos, action)
+        valid = self.is_valid_position(next_pos, grid_map)
 
-        curr_y, curr_x = agent_pos[0]
-        next_x, next_y = curr_x.item(), curr_y.item()
+        if valid:
+            next_state[1].zero_()
+            next_state[1, next_pos[0], next_pos[1]] = 1.0
+
+            goal_reached = (next_pos == goal_pos).all()
+
+            if goal_reached:
+                reward = 1.0
+                done = True
+            else:
+                reward = -0.01
+                done = False
+        else:
+            reward = -0.1
+            done = False
+
+        return next_state, reward, done
+
+    def get_next_position(self, position, action):
+        row, col = position
 
         if action == 0:  # Up
-            next_y = curr_y - 1
+            return torch.tensor([max(0, row - 1), col])
         elif action == 1:  # Right
-            next_x = curr_x + 1
+            return torch.tensor([row, col + 1])
         elif action == 2:  # Down
-            next_y = curr_y + 1
+            return torch.tensor([row + 1, col])
         else:  # Left
-            next_x = curr_x - 1
+            return torch.tensor([row, max(0, col - 1)])
 
-        grid = next_state.state[0]
-        if self.is_valid_move(grid, (next_x, next_y)):
-            next_state.state[1].zero_()
-            next_state.state[1][next_y, next_x] = 1.0
+    def is_valid_position(self, position, grid_map):
+        row, col = position
 
-        return Data(state=next_state.state)
-
-    def is_valid_move(self, grid_map, pos):
-        x, y = pos
-        if not isinstance(grid_map, torch.Tensor):
-            grid_map = torch.tensor(grid_map)
-
-        if grid_map.dim() == 1:
-            H = int(np.sqrt(grid_map.size(0)))
-            grid_map = grid_map.view(H, H)
-
-        if x < 0 or y < 0 or x >= grid_map.size(1) or y >= grid_map.size(0):
+        if row < 0 or row >= grid_map.size(0) or col < 0 or col >= grid_map.size(1):
             return False
 
-        return grid_map[y, x].item() == 1
-
-    def compute_reward(self, state, target):
-        reward = torch.zeros(1, device=self.device)
-
-        agent_pos = torch.nonzero(state.state[1])
-        goal_pos = torch.nonzero(target.state[2])
-
-        if len(agent_pos) == 0 or len(goal_pos) == 0:
-            reward[0] = -1
-            return reward
-
-        agent_pos = agent_pos[0]
-        goal_pos = goal_pos[0]
-
-        dist = torch.sqrt(
-            (agent_pos[0] - goal_pos[0]).float() ** 2
-            + (agent_pos[1] - goal_pos[1]).float() ** 2
-        )
-
-        if dist == 0:
-            reward[0] = 1
-        else:
-            reward[0] = -0.01
-
-        return reward.item()
-
-    def check_done(self, state, target):
-        agent_pos = torch.nonzero(state.state[1])
-        goal_pos = torch.nonzero(target.state[2])
-
-        if len(agent_pos) == 0 or len(goal_pos) == 0:
-            return True
-
-        agent_pos = agent_pos[0]
-        goal_pos = goal_pos[0]
-
-        return torch.all(agent_pos.eq(goal_pos)).item()
+        return grid_map[row, col] > 0

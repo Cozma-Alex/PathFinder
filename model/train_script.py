@@ -30,9 +30,9 @@ def main():
         "train_areas": [1, 2, 3, 4],
         "val_areas": [5],
         "batch_size": 32,
-        "num_epochs": 100,
-        "max_steps": 4000,
-        "learning_rate": 0.00003,
+        "num_epochs": 1,
+        "max_steps": 100,
+        "learning_rate": 0.03,
         "save_interval": 10,
     }
 

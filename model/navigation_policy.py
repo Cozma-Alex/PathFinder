@@ -62,6 +62,15 @@ class NavigationNet(nn.Module):
             return torch.randint(0, 4, (1,)), hidden
 
         with torch.no_grad():
-            policy, _, new_hidden = self.policy_net(state.unsqueeze(0), hidden)
+            policy, _, new_hidden = self.policy_net(
+                state.unsqueeze(0) if state.dim() == 3 else state, hidden
+            )
             action = torch.argmax(policy, dim=-1)
             return action, new_hidden
+
+    def load_state_dict(self, state_dict):
+        missing_keys, unexpected_keys = self.policy_net.load_state_dict(
+            state_dict, strict=False
+        )
+        if missing_keys:
+            print(f"Warning: Missing keys: {missing_keys}")
