@@ -1,11 +1,12 @@
 from PyQt6.QtWidgets import QPushButton, QFrame
 from PyQt6.QtGui import QFont
 
+
 class ModernButton(QPushButton):
     def __init__(self, text):
         super().__init__(text)
         self.setMinimumHeight(50)
-        self.setFont(QFont('Segoe UI', 11))
+        self.setFont(QFont("Segoe UI", 11))
         self.setStyleSheet("""
             QPushButton {
                 background-color: #3498db;
@@ -27,6 +28,7 @@ class ModernButton(QPushButton):
             }
         """)
 
+
 class ModernFrame(QFrame):
     def __init__(self):
         super().__init__()
@@ -38,6 +40,7 @@ class ModernFrame(QFrame):
                 padding: 15px;
             }
         """)
+
 
 MODERN_WINDOW_STYLE = """
     QMainWindow {

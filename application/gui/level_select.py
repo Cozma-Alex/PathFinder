@@ -4,6 +4,7 @@ from gui.modern_styles import ModernButton, MODERN_WINDOW_STYLE
 from gui.thor_navigation_gui import ThorNavigationGUI
 from gui.map_thor_controller import MapThorController
 
+
 class LevelSelectWindow(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -12,7 +13,7 @@ class LevelSelectWindow(QMainWindow):
         self.initUI()
 
     def initUI(self):
-        self.setWindowTitle('Select Level')
+        self.setWindowTitle("Select Level")
         self.setGeometry(200, 200, 900, 700)
         self.setStyleSheet(MODERN_WINDOW_STYLE)
 
@@ -31,12 +32,30 @@ class LevelSelectWindow(QMainWindow):
         grid.setSpacing(15)
 
         levels = [
-            "FloorPlan_Train1_1", "FloorPlan_Train1_2", "FloorPlan_Train1_3", "FloorPlan_Train1_4",
-            "FloorPlan_Train2_1", "FloorPlan_Train2_2", "FloorPlan_Train2_3", "FloorPlan_Train2_4",
-            "FloorPlan_Train3_1", "FloorPlan_Train3_2", "FloorPlan_Train3_3", "FloorPlan_Train3_4",
-            "FloorPlan_Train4_1", "FloorPlan_Train4_2", "FloorPlan_Train4_3", "FloorPlan_Train4_4",
-            "FloorPlan_Val1_1", "FloorPlan_Val1_2", "FloorPlan_Val1_3", "FloorPlan_Val1_4",
-            "FloorPlan_Val2_1", "FloorPlan_Val2_2", "FloorPlan_Val2_3", "FloorPlan_Val2_4"
+            "FloorPlan_Train1_1",
+            "FloorPlan_Train1_2",
+            "FloorPlan_Train1_3",
+            "FloorPlan_Train1_4",
+            "FloorPlan_Train2_1",
+            "FloorPlan_Train2_2",
+            "FloorPlan_Train2_3",
+            "FloorPlan_Train2_4",
+            "FloorPlan_Train3_1",
+            "FloorPlan_Train3_2",
+            "FloorPlan_Train3_3",
+            "FloorPlan_Train3_4",
+            "FloorPlan_Train4_1",
+            "FloorPlan_Train4_2",
+            "FloorPlan_Train4_3",
+            "FloorPlan_Train4_4",
+            "FloorPlan_Val1_1",
+            "FloorPlan_Val1_2",
+            "FloorPlan_Val1_3",
+            "FloorPlan_Val1_4",
+            "FloorPlan_Val2_1",
+            "FloorPlan_Val2_2",
+            "FloorPlan_Val2_3",
+            "FloorPlan_Val2_4",
         ]
 
         row = 0
@@ -53,15 +72,15 @@ class LevelSelectWindow(QMainWindow):
                 row += 1
 
         scroll.setWidget(container)
-        
+
     def start_level(self, level):
         try:
             self.thor_controller = MapThorController(scene=level)
             self.thor_controller.start()
-            
+
             if not self.thor_controller.controller:
                 raise RuntimeError("Failed to initialize Thor controller")
-                
+
             self.navigation_window = ThorNavigationGUI(self.thor_controller)
             self.navigation_window.show()
         except Exception as e:
