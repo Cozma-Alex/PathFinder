@@ -1,21 +1,21 @@
 from PyQt6.QtWidgets import QPushButton, QFrame
 from PyQt6.QtGui import QFont
 
-
 class ModernButton(QPushButton):
     def __init__(self, text):
         super().__init__(text)
         self.setMinimumHeight(50)
-        self.setFont(QFont("Segoe UI", 11))
+        self.setFont(QFont('Segoe UI', 11))
         self.setStyleSheet("""
             QPushButton {
                 background-color: #3498db;
                 color: white;
                 border: none;
                 border-radius: 8px;
-                padding: 10px 20px;
-                margin: 8px;
+                padding: 8px;
+                margin: 6px;
                 font-weight: 500;
+                text-align: center;
             }
             QPushButton:hover {
                 background-color: #2980b9;
@@ -28,7 +28,6 @@ class ModernButton(QPushButton):
             }
         """)
 
-
 class ModernFrame(QFrame):
     def __init__(self):
         super().__init__()
@@ -40,7 +39,6 @@ class ModernFrame(QFrame):
                 padding: 15px;
             }
         """)
-
 
 MODERN_WINDOW_STYLE = """
     QMainWindow {
@@ -73,5 +71,23 @@ MODERN_WINDOW_STYLE = """
     }
     QScrollBar::handle:vertical:hover {
         background-color: #a0a0a0;
+    }
+    QComboBox {
+        padding: 6px 12px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        background-color: white;
+        min-height: 30px;
+    }
+    QComboBox::drop-down {
+        width: 20px;
+        border-left: 1px solid #ccc;
+    }
+    QLineEdit {
+        padding: 6px 12px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        background-color: white;
+        min-height: 30px;
     }
 """

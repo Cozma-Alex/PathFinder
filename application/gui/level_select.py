@@ -1,5 +1,4 @@
 from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QScrollArea, QGridLayout
-from PyQt6.QtCore import Qt
 from gui.modern_styles import ModernButton, MODERN_WINDOW_STYLE
 from gui.thor_navigation_gui import ThorNavigationGUI
 from gui.map_thor_controller import MapThorController
