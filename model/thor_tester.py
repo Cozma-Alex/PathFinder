@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 from gui.map_thor_controller import MapThorController
+from application.thor_controller.thor_controller import Action
 
 
 class ThorTester:
@@ -29,7 +30,7 @@ class ThorTester:
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
             action, hidden = self.model.get_action(state_tensor, hidden)
 
-            next_pos = self.get_next_position(current_pos, action.item())
+            next_pos = self.get_next_position(current_pos, action)
 
             if not self.is_valid_position(next_pos, grid_map):
                 break
@@ -79,14 +80,16 @@ class ThorTester:
 
     def get_next_position(self, current_pos, action):
         x, z = current_pos
-        if action == 0:
+        if action == Action.MOVE_FORWARD:
             return (x, z - 1)
-        elif action == 1:
+        elif action == Action.FACE_EAST:
             return (x + 1, z)
-        elif action == 2:
+        elif action == Action.MOVE_BACK:
             return (x, z + 1)
-        else:
+        elif action == Action.FACE_WEST:
             return (x - 1, z)
+        else:
+            return current_pos
 
     def is_valid_position(self, pos, grid_map):
         x, z = pos

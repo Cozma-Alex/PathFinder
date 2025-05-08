@@ -11,11 +11,10 @@ logger = logging.getLogger('pathfinder')
 class Action(Enum):
     MOVE_FORWARD = "MoveAhead"
     MOVE_BACK = "MoveBack"
-    FACE_NORTH = "Teleport,rotation=180"
-    FACE_SOUTH = "Teleport,rotation=0"
-    FACE_EAST = "Teleport,rotation=90"
-    FACE_WEST = "Teleport,rotation=270"
-    PASS = "Pass"
+    FACE_NORTH = "RotateAgent"  # Will use with rotation parameter y=180
+    FACE_SOUTH = "RotateAgent"  # Will use with rotation parameter y=0
+    FACE_EAST = "RotateAgent"   # Will use with rotation parameter y=90
+    FACE_WEST = "RotateAgent"   # Will use with rotation parameter y=270
 
 class ThorController:
     def __init__(self, scene: str = "FloorPlan_Train1_1", headless: bool = False):
@@ -35,6 +34,12 @@ class ThorController:
             'down': Action.FACE_SOUTH,
             'left': Action.FACE_WEST,
             'right': Action.FACE_EAST
+        }
+        self.rotation_mappings = {
+            Action.FACE_NORTH: 180,
+            Action.FACE_SOUTH: 0,
+            Action.FACE_EAST: 90,
+            Action.FACE_WEST: 270
         }
         
     def init_controller(self):
@@ -57,7 +62,7 @@ class ThorController:
                 )
             logger.info(f"Controller initialized for scene: {self.scene}")
             
-            # Test with a simple Pass action
+            # Test with a simple action
             first_event = self.controller.step(action="Pass")
             logger.info(f"Initialize return: {first_event.metadata}")
             if not first_event.metadata.get('lastActionSuccess', True):
@@ -100,21 +105,23 @@ class ThorController:
                 
         if self.current_key in self.key_mappings:
             action = self.key_mappings[self.current_key]
+            
+            # Handle rotation actions
             if action in [Action.FACE_NORTH, Action.FACE_SOUTH, Action.FACE_EAST, Action.FACE_WEST]:
-                rotation = int(action.value.split('rotation=')[1])
                 try:
                     with self.controller_lock:
                         if not self.controller:
                             return None
-                        current_pos = self.controller.last_event.metadata['agent']['position']
+                        rotation = self.rotation_mappings[action]
                         return self.controller.step(
-                            action="Teleport",
-                            position=current_pos,
-                            rotation={"y": rotation}
+                            action="RotateAgent", 
+                            degrees=rotation
                         )
                 except Exception as e:
                     logger.error(f"Error during rotation: {str(e)}")
                     return None
+            
+            # Handle regular actions
             try:
                 with self.controller_lock:
                     if not self.controller:
@@ -124,14 +131,8 @@ class ThorController:
                 logger.error(f"Error executing action {action.value}: {str(e)}")
                 return None
         
-        try:
-            with self.controller_lock:
-                if not self.controller:
-                    return None
-                return self.controller.step(action=Action.PASS.value)
-        except Exception as e:
-            logger.error(f"Error executing Pass action: {str(e)}")
-            return None
+        # If no key is pressed, don't do anything (removed Pass action)
+        return None
 
     def _control_loop(self):
         retry_count = 0
@@ -246,6 +247,12 @@ class ThorController:
                 return {}
                 
             try:
+                # Handle rotation actions separately
+                if action in [Action.FACE_NORTH, Action.FACE_SOUTH, Action.FACE_EAST, Action.FACE_WEST]:
+                    rotation = self.rotation_mappings[action]
+                    return self.controller.step(action="RotateAgent", degrees=rotation)
+                
+                # Regular action
                 return self.controller.step(action=action.value)
             except Exception as e:
                 logger.error(f"Error executing action {action.value}: {str(e)}")

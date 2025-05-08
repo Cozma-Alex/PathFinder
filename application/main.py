@@ -4,12 +4,12 @@ from PyQt6.QtCore import Qt
 from gui.modern_styles import ModernButton, ModernFrame, MODERN_WINDOW_STYLE
 from gui.thor_navigation_gui import ThorNavigationGUI
 from gui.map_thor_controller import MapThorController
+from thor_controller.thor_controller import Action
 import torch
 import sys
 import os
 import logging
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -17,21 +17,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger("pathfinder")
 
-# Add the project root directory to the system path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 
 class NavigationNet:
-    """Custom wrapper to handle model loading regardless of structure."""
-
     def __init__(self):
         self.policy_net = None
         self.hidden = None
+        self.action_mapping = {
+            0: Action.MOVE_FORWARD,
+            1: Action.FACE_EAST,
+            2: Action.MOVE_BACK,
+            3: Action.FACE_WEST
+        }
 
     def load_state_dict(self, state_dict):
         try:
             logger.info("Attempting to load model...")
-            # Create a simple default network that can handle basic navigation
             import torch.nn as nn
             import torch.nn.functional as F
 
@@ -46,7 +48,6 @@ class NavigationNet:
                     if x.dim() == 3:
                         x = x.unsqueeze(0)
 
-                    # Ensure input has proper dimensions
                     if x.shape[2] != 64 or x.shape[3] != 64:
                         x = F.interpolate(x, size=(64, 64), mode="nearest")
 
@@ -60,11 +61,8 @@ class NavigationNet:
 
             self.policy_net = SimplePolicy()
 
-            # Check if state_dict is a complete model or just network weights
             if isinstance(state_dict, dict) and "policy_net.conv1.weight" in state_dict:
-                # Full model state dict
                 new_state_dict = {}
-                # Remove prefixes like 'policy_net.'
                 for k, v in state_dict.items():
                     if k.startswith("policy_net."):
                         new_key = k[len("policy_net.") :]
@@ -86,23 +84,21 @@ class NavigationNet:
             return False
 
     def get_action(self, state, hidden=None, epsilon=0.1):
-        # Add random exploration to make navigation more robust
         if torch.rand(1).item() < epsilon:
-            return torch.randint(0, 4, (1,)), hidden
+            action_idx = torch.randint(0, 4, (1,)).item()
+            return self.action_mapping[action_idx], hidden
 
         if self.policy_net is not None:
             with torch.no_grad():
                 try:
                     policy, _, new_hidden = self.policy_net(state, hidden)
-                    action = torch.argmax(policy, dim=1)
-                    return action, new_hidden
+                    action_idx = torch.argmax(policy, dim=1).item()
+                    return self.action_mapping[action_idx], new_hidden
                 except Exception as e:
                     logger.error(f"Error during prediction: {str(e)}")
-                    # Return a random action as fallback
-                    return torch.randint(0, 4, (1,)), hidden
+                    return self.action_mapping[0], hidden
 
-        # Fallback to random action if model loading failed
-        return torch.randint(0, 4, (1,)), hidden
+        return self.action_mapping[0], hidden
 
 
 class PathFinderApp(QMainWindow):
@@ -155,7 +151,6 @@ class PathFinderApp(QMainWindow):
         model_frame = ModernFrame()
         model_layout = QVBoxLayout(model_frame)
 
-        # Model selection section
         model_section = QHBoxLayout()
         model_label = QLabel("Navigation Model:")
         self.model_path_label = QLabel("No model selected")
@@ -168,7 +163,6 @@ class PathFinderApp(QMainWindow):
         model_section.addWidget(self.browse_button)
         model_layout.addLayout(model_section)
 
-        # Level selection section
         level_section = QHBoxLayout()
         level_label = QLabel("Environment Level:")
         self.level_combo = QComboBox()
@@ -180,14 +174,12 @@ class PathFinderApp(QMainWindow):
         level_section.addWidget(self.level_combo, 1)
         model_layout.addLayout(level_section)
 
-        # Start button
         start_section = QHBoxLayout()
         start_section.addStretch()
         self.launch_button = ModernButton("Launch Navigation")
         self.launch_button.setMinimumWidth(200)
         self.launch_button.clicked.connect(self.launch_navigation)
 
-        # Enable launch button even without model - we'll use random navigation as fallback
         self.launch_button.setEnabled(True)
 
         start_section.addWidget(self.launch_button)
@@ -195,7 +187,6 @@ class PathFinderApp(QMainWindow):
 
         model_layout.addLayout(start_section)
 
-        # Status display
         self.status_label = QLabel(
             "Select a model file or click Launch for random navigation"
         )
@@ -234,11 +225,10 @@ class PathFinderApp(QMainWindow):
         try:
             self.status_label.setText("Loading model...")
 
-            # Use weights_only=True to avoid pickle security issues
             state_dict = torch.load(
                 self.model_path,
                 map_location=torch.device("cpu"),
-                weights_only=True,  # Security improvement
+                weights_only=True,
             )
 
             if self.model.load_state_dict(state_dict):
@@ -248,28 +238,25 @@ class PathFinderApp(QMainWindow):
                 self.status_label.setText(
                     "Error loading model. Using random navigation."
                 )
-                return True  # Still return True to continue with fallback
+                return True
         except Exception as e:
             self.status_label.setText(f"Error loading model: {str(e)}")
             logger.error(f"Error loading model: {str(e)}")
-            return True  # Still return True to continue with fallback
+            return True
 
     def launch_navigation(self):
         if self.load_model():
             try:
                 self.status_label.setText("Initializing environment...")
 
-                # Create controller for the selected scene
                 self.thor_controller = MapThorController(scene=self.current_scene)
 
-                # Start the controller
                 self.thor_controller.start()
 
                 if not self.thor_controller.controller:
                     self.status_label.setText("Failed to initialize Thor controller")
                     return
 
-                # Create and show navigation window
                 self.status_label.setText("Starting navigation...")
                 self.navigation_window = ThorNavigationGUI(
                     self.thor_controller, self.model

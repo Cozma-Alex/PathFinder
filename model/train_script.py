@@ -2,10 +2,12 @@ import os
 import torch
 import logging
 from datetime import datetime
-from s3dis_room_database import S3DISRoomDataset, S3DISNavigationDataset
 from navigation_policy import NavigationNet
 from navigation_trainer import NavigationTrainer
 import json
+import sys
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 
 def setup_logging(save_dir):
@@ -233,10 +235,10 @@ def main():
         "data_root": "../S3DIS/Stanford3dDataset_v1.2_Aligned_Version",
         "train_areas": [1, 2, 3, 4],
         "val_areas": [5],
-        "batch_size": 32,
+        "batch_size": 256,
         "num_epochs": 5,
-        "max_steps": 20,
-        "learning_rate": 0.0003,
+        "max_steps": 5,
+        "learning_rate": 0.00001,
         "save_interval": 1,
         "target_size": (64, 64),  # Target size for all room grids
         "use_synthetic": True,  # Set to True to use synthetic data
@@ -256,72 +258,9 @@ def main():
     model = NavigationNet().to(device)
     trainer = NavigationTrainer(model, device=device, max_steps=config["max_steps"])
 
-    if config.get("use_synthetic", False):
-        # Train with synthetic data
-        logger.info("Using synthetic data for training")
-        train_synthetic(model, trainer, config, save_dir, logger)
-    else:
-        # Train with real dataset
-        logger.info("Loading datasets...")
-        try:
-            train_room_dataset = S3DISRoomDataset(
-                config["data_root"], area_ids=config["train_areas"]
-            )
-            val_room_dataset = S3DISRoomDataset(
-                config["data_root"], area_ids=config["val_areas"]
-            )
-
-            train_dataset = S3DISNavigationDataset(train_room_dataset)
-            val_dataset = S3DISNavigationDataset(val_room_dataset)
-
-            logger.info(f"Train dataset size: {len(train_dataset)}")
-            logger.info(f"Validation dataset size: {len(val_dataset)}")
-
-            # Create custom iterators instead of using DataLoader
-            train_loader = CustomDataIterator(
-                train_dataset,
-                batch_size=config["batch_size"],
-                shuffle=True,
-                target_size=config["target_size"],
-            )
-
-            logger.info("Starting training...")
-            best_loss = float("inf")
-            for epoch in range(config["num_epochs"]):
-                train_loss = trainer.train_epoch(train_loader, epoch)
-                logger.info(f"Epoch {epoch}: Train Loss = {train_loss:.4f}")
-
-                if (
-                    epoch % config["save_interval"] == 0
-                    or epoch == config["num_epochs"] - 1
-                ):
-                    checkpoint_path = os.path.join(
-                        save_dir, f"checkpoint_epoch_{epoch}.pt"
-                    )
-                    torch.save(
-                        {
-                            "epoch": epoch,
-                            "model_state_dict": model.state_dict(),
-                            "optimizer_state_dict": trainer.optimizer.state_dict(),
-                            "loss": train_loss,
-                            "epsilon": trainer.epsilon,
-                        },
-                        checkpoint_path,
-                    )
-                    logger.info(f"Saved checkpoint to {checkpoint_path}")
-
-                    if train_loss < best_loss:
-                        best_loss = train_loss
-                        best_model_path = os.path.join(save_dir, "best_model.pt")
-                        torch.save(model.state_dict(), best_model_path)
-                        logger.info(f"Saved best model with loss {best_loss:.4f}")
-
-            final_model_path = os.path.join(save_dir, "final_model.pt")
-            torch.save(model.state_dict(), final_model_path)
-        except Exception as e:
-            logger.error(f"Error during dataset training: {str(e)}")
-            logger.info("Falling back to synthetic data training...")
-            train_synthetic(model, trainer, config, save_dir, logger)
+    # For simplicity, we'll use synthetic data for training
+    logger.info("Using synthetic data for training")
+    train_synthetic(model, trainer, config, save_dir, logger)
 
     logger.info(f"Training completed. Final model saved to {save_dir}")
 

@@ -16,13 +16,11 @@ def create_synthetic_data(batch_size=16, grid_size=32):
             if 0 <= i < grid_size and 0 <= j < grid_size:
                 grid_map[i, j] = 0
 
-        # Random start and goal positions
         valid_positions = np.array(np.where(grid_map == 1)).T
         idx = np.random.choice(len(valid_positions), 2, replace=False)
         start_pos = valid_positions[idx[0]]
         goal_pos = valid_positions[idx[1]]
 
-        # Create state representation
         state = np.zeros((3, grid_size, grid_size), dtype=np.float32)
         state[0] = grid_map
         state[1, start_pos[0], start_pos[1]] = 1.0

@@ -1,6 +1,24 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import sys
+import os
+import enum
+
+# Add parent directory to path to allow importing from application
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+try:
+    from application.thor_controller.thor_controller import Action
+except ImportError:
+    # Fallback if application module can't be imported
+    class Action(enum.Enum):
+        MOVE_FORWARD = "MoveAhead"
+        MOVE_BACK = "MoveBack"
+        FACE_NORTH = "RotateAgent"  # Will use with rotation parameter y=180
+        FACE_SOUTH = "RotateAgent"  # Will use with rotation parameter y=0
+        FACE_EAST = "RotateAgent"   # Will use with rotation parameter y=90
+        FACE_WEST = "RotateAgent"   # Will use with rotation parameter y=270
 
 
 class NavigationPolicy(nn.Module):
@@ -53,20 +71,27 @@ class NavigationNet(nn.Module):
         self.policy_net = NavigationPolicy()
         self.target_net = NavigationPolicy()
         self.target_net.load_state_dict(self.policy_net.state_dict())
+        self.action_mapping = {
+            0: Action.MOVE_FORWARD,
+            1: Action.FACE_EAST,
+            2: Action.MOVE_BACK,
+            3: Action.FACE_WEST
+        }
 
     def update_target_net(self):
         self.target_net.load_state_dict(self.policy_net.state_dict())
 
     def get_action(self, state, hidden=None, epsilon=0.0):
         if torch.rand(1) < epsilon:
-            return torch.randint(0, 4, (1,)), hidden
+            action_idx = torch.randint(0, 4, (1,))
+            return self.action_mapping[action_idx.item()], hidden
 
         with torch.no_grad():
             policy, _, new_hidden = self.policy_net(
                 state.unsqueeze(0) if state.dim() == 3 else state, hidden
             )
-            action = torch.argmax(policy, dim=-1)
-            return action, new_hidden
+            action_idx = torch.argmax(policy, dim=-1).item()
+            return self.action_mapping[action_idx], new_hidden
 
     def load_state_dict(self, state_dict):
         missing_keys, unexpected_keys = self.policy_net.load_state_dict(

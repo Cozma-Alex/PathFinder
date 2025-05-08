@@ -78,13 +78,27 @@ class MapThorController(ThorController):
         rotation = {"x": 0, "y": 0, "z": 0}
 
         try:
-            return self.controller.step(
-                action="TeleportFull",
+            # Use the Teleport action with proper parameters
+            event = self.controller.step(
+                action="Teleport",
                 position=position,
                 rotation=rotation,
                 horizon=30.0,
                 forceAction=True,
             )
+            
+            # Check if teleport was successful
+            if event and not event.metadata.get('lastActionSuccess', True):
+                # Fallback to TeleportFull if Teleport doesn't work
+                event = self.controller.step(
+                    action="TeleportFull",
+                    position=position,
+                    rotation=rotation,
+                    horizon=30.0,
+                    forceAction=True,
+                )
+                
+            return event
         except Exception as e:
             print(f"Teleport error: {str(e)}")
             return None

@@ -103,28 +103,72 @@ class ThorNavigationGUI(QMainWindow):
             return
 
         key = event.key()
+        current_pos = self.thor_controller.get_current_grid_position()
+        
         if key == Qt.Key.Key_W:
+            # Move forward - first get the action, then update the path
             self.thor_controller.execute_action(Action.MOVE_FORWARD)
+            # Update path after movement
+            new_pos = self.thor_controller.get_current_grid_position()
+            if new_pos != current_pos:
+                self.current_path.append(new_pos)
+                
         elif key == Qt.Key.Key_S:
-            self.thor_controller.execute_action(Action.MOVE_BACK)
+            # Move backward
+            self.thor_controller.execute_action(Action.MOVE_BACK) 
+            # Update path after movement
+            new_pos = self.thor_controller.get_current_grid_position()
+            if new_pos != current_pos:
+                self.current_path.append(new_pos)
+                
         elif key == Qt.Key.Key_A:
+            # Rotate west and then try to move west
             self.thor_controller.execute_action(Action.FACE_WEST)
+            
+            # After rotation, try to move in that direction
+            west_pos = (current_pos[0] - 1, current_pos[1])
+            if self.thor_controller.is_position_reachable(*west_pos):
+                self.thor_controller.teleport_to_grid_position(*west_pos)
+                self.current_path.append(west_pos)
+                
         elif key == Qt.Key.Key_D:
+            # Rotate east and then try to move east
             self.thor_controller.execute_action(Action.FACE_EAST)
+            
+            # After rotation, try to move in that direction
+            east_pos = (current_pos[0] + 1, current_pos[1])
+            if self.thor_controller.is_position_reachable(*east_pos):
+                self.thor_controller.teleport_to_grid_position(*east_pos)
+                self.current_path.append(east_pos)
+                
         elif key == Qt.Key.Key_Q:
+            # Rotate north and then try to move north
             self.thor_controller.execute_action(Action.FACE_NORTH)
+            
+            # After rotation, try to move in that direction
+            north_pos = (current_pos[0], current_pos[1] - 1)
+            if self.thor_controller.is_position_reachable(*north_pos):
+                self.thor_controller.teleport_to_grid_position(*north_pos)
+                self.current_path.append(north_pos)
+                
         elif key == Qt.Key.Key_E:
+            # Rotate south and then try to move south
             self.thor_controller.execute_action(Action.FACE_SOUTH)
+            
+            # After rotation, try to move in that direction
+            south_pos = (current_pos[0], current_pos[1] + 1)
+            if self.thor_controller.is_position_reachable(*south_pos):
+                self.thor_controller.teleport_to_grid_position(*south_pos)
+                self.current_path.append(south_pos)
 
     def update_views(self):
         grid_map = self.thor_controller.get_grid_map()
         current_pos = self.thor_controller.get_current_grid_position()
 
         vis_map = np.zeros((grid_map.shape[0], grid_map.shape[1], 3), dtype=np.uint8)
-        vis_map[grid_map == 1] = [245, 245, 245]  # White for navigable areas
-        vis_map[grid_map == 0] = [40, 40, 40]  # Dark gray for obstacles
+        vis_map[grid_map == 1] = [245, 245, 245]
+        vis_map[grid_map == 0] = [40, 40, 40]
 
-        # Draw path points
         for path_pos in self.current_path:
             if (
                 path_pos != self.start_pos
@@ -135,25 +179,24 @@ class ThorNavigationGUI(QMainWindow):
                     180,
                     180,
                     180,
-                ]  # Light gray for path
+                ]
 
-        # Draw the positions with 1x1 squares (filled)
         if self.start_pos:
             vis_map[self.start_pos[1], self.start_pos[0]] = [
                 52,
                 152,
                 219,
-            ]  # Blue for start
+            ]
 
         if self.goal_pos:
-            vis_map[self.goal_pos[1], self.goal_pos[0]] = [231, 76, 60]  # Red for goal
+            vis_map[self.goal_pos[1], self.goal_pos[0]] = [231, 76, 60]
 
         if current_pos:
             vis_map[current_pos[1], current_pos[0]] = [
                 46,
                 204,
                 113,
-            ]  # Green for robot/agent position
+            ]
 
         h, w = vis_map.shape[:2]
         qt_map = QImage(vis_map.data, w, h, w * 3, QImage.Format.Format_RGB888)
@@ -241,20 +284,15 @@ class ThorNavigationGUI(QMainWindow):
             self.status_label.setText(f"Error during navigation: {str(e)}")
 
     def prepare_input_for_model(self, state_tensor):
-        """Resize the input tensor if needed to match model expectations"""
         try:
-            # Create a small test input to check what size the model expects
             with torch.no_grad():
                 test_input = torch.zeros((1, 3, 64, 64), dtype=torch.float32)
                 self.model.get_action(test_input)
 
-            # If we got here, the model expects 64x64 input
             if state_tensor.shape[1] != 64 or state_tensor.shape[2] != 64:
-                # Resize each channel to 64x64
                 resized_state = torch.zeros((3, 64, 64), dtype=torch.float32)
                 for i in range(3):
                     channel = state_tensor[i]
-                    # Use PyTorch's interpolate for resizing
                     resized_channel = torch.nn.functional.interpolate(
                         channel.unsqueeze(0).unsqueeze(0), size=(64, 64), mode="nearest"
                     ).squeeze()
@@ -262,7 +300,6 @@ class ThorNavigationGUI(QMainWindow):
                 return resized_state
             return state_tensor
         except:
-            # If testing fails, just return original tensor
             return state_tensor
 
     def run_auto_navigation(self):
@@ -313,30 +350,72 @@ class ThorNavigationGUI(QMainWindow):
             return
 
         try:
-            # Preprocess the state to match model's expected input size
             processed_state = self.prepare_input_for_model(state)
 
-            # Get action from model
             action, self.hidden_state = self.model.get_action(
                 processed_state.unsqueeze(0), self.hidden_state
             )
-            action_idx = action.item()
 
-            next_pos = self.get_next_position(current_pos, action_idx)
+            # First execute the rotation action if it's a facing direction
+            if action in [Action.FACE_NORTH, Action.FACE_SOUTH, Action.FACE_EAST, Action.FACE_WEST]:
+                self.thor_controller.execute_action(action)
+
+            # Then determine next position based on the action
+            next_pos = self.get_next_position(current_pos, action)
+            
+            # Check if position is valid
             if self.thor_controller.is_position_reachable(*next_pos):
+                # Now teleport to the position
                 event = self.thor_controller.teleport_to_grid_position(*next_pos)
                 if event and event.metadata["lastActionSuccess"]:
                     self.current_path.append(next_pos)
 
+                    # Update the state to reflect the new position
                     state[1].zero_()
                     state[1, next_pos[1], next_pos[0]] = 1.0
 
+                    # Continue navigation after a short delay
                     QTimer.singleShot(300, lambda: self.navigate_with_model(state))
                 else:
-                    self.status_label.setText("Navigation error: Invalid move")
-                    self.navigation_active = False
+                    # If teleport failed, try an alternative approach - execute the action directly
+                    if action == Action.MOVE_FORWARD:
+                        self.thor_controller.execute_action(action)
+                        new_pos = self.thor_controller.get_current_grid_position()
+                        if new_pos != current_pos:
+                            self.current_path.append(new_pos)
+                            # Update state for next iteration
+                            state[1].zero_()
+                            state[1, new_pos[1], new_pos[0]] = 1.0
+                            QTimer.singleShot(300, lambda: self.navigate_with_model(state))
+                        else:
+                            self.status_label.setText("Navigation paused: Unable to move forward")
+                            self.navigation_active = False
+                    else:
+                        self.status_label.setText("Navigation error: Invalid move")
+                        self.navigation_active = False
             else:
-                self.status_label.setText("Navigation error: Unreachable position")
+                # Try to find a valid adjacent position
+                valid_neighbors = []
+                for dx, dy in [(0, -1), (1, 0), (0, 1), (-1, 0)]:  # N, E, S, W
+                    neighbor = (current_pos[0] + dx, current_pos[1] + dy)
+                    if self.thor_controller.is_position_reachable(*neighbor):
+                        valid_neighbors.append(neighbor)
+                
+                if valid_neighbors:
+                    # Find closest neighbor to goal
+                    if self.goal_pos:
+                        closest = min(valid_neighbors, key=lambda pos: 
+                            (pos[0] - self.goal_pos[0])**2 + (pos[1] - self.goal_pos[1])**2)
+                        
+                        event = self.thor_controller.teleport_to_grid_position(*closest)
+                        if event and event.metadata["lastActionSuccess"]:
+                            self.current_path.append(closest)
+                            state[1].zero_()
+                            state[1, closest[1], closest[0]] = 1.0
+                            QTimer.singleShot(300, lambda: self.navigate_with_model(state))
+                            return
+                
+                self.status_label.setText("Navigation error: No valid path found")
                 self.navigation_active = False
         except Exception as e:
             self.status_label.setText(f"Error during auto navigation: {str(e)}")
@@ -344,14 +423,43 @@ class ThorNavigationGUI(QMainWindow):
 
     def get_next_position(self, current_pos, action):
         x, z = current_pos
-        if action == 0:  # Up
-            return (x, z - 1)
-        elif action == 1:  # Right
+        
+        agent_rotation = 0
+        try:
+            event = self.thor_controller.get_current_state()
+            if event and event.metadata and 'agent' in event.metadata:
+                agent_rotation = event.metadata['agent']['rotation']['y']
+        except:
+            pass
+
+        if action == Action.MOVE_FORWARD:
+            if agent_rotation == 0:
+                return (x, z + 1)
+            elif agent_rotation == 90:
+                return (x + 1, z)
+            elif agent_rotation == 180:
+                return (x, z - 1)
+            elif agent_rotation == 270:
+                return (x - 1, z)
+        elif action == Action.MOVE_BACK:
+            if agent_rotation == 0:
+                return (x, z - 1)
+            elif agent_rotation == 90:
+                return (x - 1, z)
+            elif agent_rotation == 180: 
+                return (x, z + 1)
+            elif agent_rotation == 270:
+                return (x + 1, z)
+        elif action == Action.FACE_EAST:
             return (x + 1, z)
-        elif action == 2:  # Down
-            return (x, z + 1)
-        else:  # Left
+        elif action == Action.FACE_WEST:
             return (x - 1, z)
+        elif action == Action.FACE_NORTH:
+            return (x, z - 1)
+        elif action == Action.FACE_SOUTH:
+            return (x, z + 1)
+            
+        return current_pos
 
     def stop_navigation(self):
         self.navigation_active = False

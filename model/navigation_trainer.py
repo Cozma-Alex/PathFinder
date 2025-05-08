@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 from collections import deque
+from application.thor_controller.thor_controller import Action
 
 
 class NavigationTrainer:
@@ -18,14 +19,22 @@ class NavigationTrainer:
         self.target_update = 10
         self.steps_done = 0
         self.max_steps = max_steps
+        self.action_to_idx = {
+            Action.MOVE_FORWARD: 0,
+            Action.FACE_EAST: 1,
+            Action.MOVE_BACK: 2,
+            Action.FACE_WEST: 3
+        }
 
     def store_transition(self, state, action, reward, next_state, done):
-        self.memory.append((state, action, reward, next_state, done))
+        action_idx = self.action_to_idx[action]
+        self.memory.append((state, action_idx, reward, next_state, done))
 
     def update_policy(self, state, action, reward, next_state, done):
         state = state.to(self.device)
         next_state = next_state.to(self.device)
-        action = torch.tensor([action], device=self.device).unsqueeze(1)
+        action_idx = self.action_to_idx[action] if isinstance(action, Action) else action
+        action = torch.tensor([action_idx], device=self.device).unsqueeze(1)
         reward = torch.tensor([reward], device=self.device)
         done = torch.tensor([done], dtype=torch.bool, device=self.device)
 
@@ -63,13 +72,12 @@ class NavigationTrainer:
                     action, _ = self.model.get_action(
                         current_state, epsilon=self.epsilon
                     )
-                    action_idx = action.item()
-
+                    
                     next_state, reward, done = self.simulate_step(
-                        current_state, action_idx
+                        current_state, action
                     )
                     loss = self.update_policy(
-                        current_state, action_idx, reward, next_state, done
+                        current_state, action, reward, next_state, done
                     )
                     batch_loss += loss
 
@@ -126,13 +134,13 @@ class NavigationTrainer:
     def get_next_position(self, position, action):
         row, col = position
 
-        if action == 0:  # Up
+        if action == Action.MOVE_FORWARD:
             return torch.tensor([max(0, row - 1), col])
-        elif action == 1:  # Right
+        elif action == Action.FACE_EAST:
             return torch.tensor([row, col + 1])
-        elif action == 2:  # Down
+        elif action == Action.MOVE_BACK:
             return torch.tensor([row + 1, col])
-        else:  # Left
+        else:  # Action.FACE_WEST
             return torch.tensor([row, max(0, col - 1)])
 
     def is_valid_position(self, position, grid_map):
