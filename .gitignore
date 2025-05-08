@@ -936,6 +936,8 @@ coverage*[.json, .xml, .info]
 ./path_finder/*/*
 ./path_finder/*/*/*/*
 ./path_finder/*
+./model/trained_models/*/*
+*.pt
 
 ### xmake ###
 # Xmake cache
